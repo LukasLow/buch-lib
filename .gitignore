@@ -1,0 +1,13 @@
+# Atomic-write temp files (temp file + rename)
+*.tmp-*
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Local scratch that must never be published
+/scratch/
+*.local.md
+*.local.json

@@ -1,0 +1,31 @@
+[project]
+  name = "buch-lib"
+
+[container]
+  workdir = "/app"
+
+[security]
+  allow_env = []
+
+[volume]
+  enabled = false
+  [volume.packages]
+
+[port]
+
+[session]
+  ports = []
+
+[live]
+  mount_pwd = true
+  ports = []
+
+[temp]
+  allow_env = []
+  mount_pwd = true
+  read_only = false
+
+[dockerfile]
+  lines = ["FROM docker.io/debian:bookworm-slim", "RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*"]
+
+# For more information see: smd --help | smd --agent | smd --toml
