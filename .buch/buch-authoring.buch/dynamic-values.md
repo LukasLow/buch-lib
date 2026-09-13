@@ -5,29 +5,34 @@ it. The mechanism is deliberately small: a `.kdb/**/*.js` module defines a
 **key**, and a page references that key with the placeholder syntax
 `%%key%%` (a key surrounded by doubled percent signs).
 
-Dots in a key are **path separators**, not part of a filename:
+Dots in a key are **path separators**, not part of a filename. A key is written
+in a page surrounded by doubled percent signs; the table shows just the key name:
 
-| Reference in a page     | Module that backs it              |
-|-------------------------|-----------------------------------|
-| `%%format-version%%`    | `.kdb/format-version.js`          |
-| `%%company.support%%`   | `.kdb/company/support.js`         |
-| `%%cli.binary-name%%`   | `.kdb/cli/binary-name.js`         |
+| Key name            | Module that backs it              |
+|---------------------|-----------------------------------|
+| `format-version`    | `.kdb/format-version.js`          |
+| `company.support`   | `.kdb/company/support.js`         |
+| `cli.binary-name`   | `.kdb/cli/binary-name.js`         |
 
-So `%%company.support%%` is the reference for
-`.kdb/company/support.js`. This page's own examples resolve against this buch:
-the format version here is `%%format-version%%` and support is
-`%%company.support%%`.
+So a page mentions the key `company.support` as `%%company.support%%` to read
+`.kdb/company/support.js`. This page demonstrates both outcomes: a live value
+(the format version here renders as `%%format-version%%`) and a literal token
+that is shown verbatim (`%%company.support%%`). The
+[next section](#the-placeholder-syntax) explains why the second cannot simply be
+typed into the page.
 
 ## The placeholder syntax
 
-Because these pages are rendered before you read them, the literal token
-`%%key%%` cannot be typed directly into a page — the renderer would try to
-resolve it. To display the token itself, back it with a value that returns the
-token text. This buch does exactly that with `%%key%%`.
+A reference in a page is a key wrapped in doubled percent signs: `%%key%%`.
+The renderer replaces every such reference with the key's value before you read
+the page. That has one consequence for documentation: the literal text
+`%%key%%` **cannot be typed directly into a page**, because the renderer would
+try to resolve `key` and fail.
 
-For the same reason, write a literal placeholder in documentation by having a
-module return it (replacement output is never scanned again). An empty
-reference, i.e. four percent signs in a row, is ignored by the renderer.
+The supported way to show a placeholder literally is to back it with a module
+that returns the token text. Replacement output is never scanned again, so the
+returned `%%key%%` survives in the rendered page. This buch does exactly that:
+the token above is produced by `.kdb/key.js` returning `"%%key%%"`.
 
 ## A module is an expression
 
@@ -88,17 +93,17 @@ page.
 ## Escaping and errors
 
 Errors never take down a whole render. A missing, malformed or failing key is
-replaced by an **inline marker** in the output, while the rest of the page still
-renders. For example, the deliberately broken key `%%unknown%%` in this buch
-renders as:
+replaced by an **inline marker**; the rest of the page still renders. This buch
+shows the marker using a helper module, so the literal text survives rendering:
 
 ```text
 %%error-example%%
 ```
 
-The marker has the form `%%marker-form%%`. A whole-page render only fails when
-the result exceeds the output cap, or when the library is an untrusted git
-remote and rendering was requested (see below).
+Its general shape is `%%marker-form%%`. A real failure also carries the source
+location, for example `at .kdb/<key>.js:<line>:<col>`. A whole-page render only
+fails when the result exceeds the output cap, or when the library is an
+untrusted git remote and rendering was requested (see below).
 
 Common causes, all reported inline:
 
