@@ -1,0 +1,1050 @@
+# Function declarations
+
+This page is the **complete formal reference** for Mojo function declarations,
+mirroring `/docs/reference/function-declarations/`. It covers every part of the
+grammar: names, signatures, markers, argument conventions, variadics, effects,
+return types, special methods, nested functions, static methods and overload
+resolution. The `def` keyword page
+([`keywords/def`](../keywords/def.md)) teaches the keyword and the tour material;
+this page is the exhaustive form. The guided tour of parameters and generics is
+on [Parameters and generics](../functions/parameters-and-generics.md).
+
+## What a function declaration is
+
+> A *function declaration* introduces a named, callable unit of code. Every
+> function in Mojo starts with the `def` keyword:
+
+```mojo
+def greet(name: String) -> String:
+    return "Hello, " + name
+```
+
+> The simplest function has a name, empty parentheses, and a body:
+
+```mojo
+def do_nothing():
+    pass
+```
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>.
+
+Arguments are runtime values in parentheses; parameters are compile-time values
+in square brackets. The terminology is deliberate; the tour's glossary lives on
+[Parameters and generics](../functions/parameters-and-generics.md).
+
+## Function names
+
+> Function names must be valid identifiers. Backtick-escaped identifiers allow
+> keywords as function names:
+
+```mojo
+def `import`():
+    print("In `import`")
+
+def main():
+    `import`() # In `import`
+```
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>. Identifier
+rules are on [Keywords](../keywords/index.md).
+
+## Function signature grammar
+
+```text
+def name(argument-list) -> ReturnType:
+    body
+
+def name[parameter-list](argument-list) -> ReturnType:
+    body
+
+def name(argument-list) raises -> ReturnType:
+    body
+
+def name[parameter-list](argument-list)
+    -> ReturnType where constraint:
+    body
+
+def name[parameter-list](argument-list) raises
+    -> ReturnType where constraint:
+    body
+```
+
+> A signature can include a name, a parameter list, an argument list, effects, a
+> return type, and a `where` clause. Only the parentheses and the colon are
+> required.
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>.
+
+```mojo
+# T must be both `Comparable` (to test with `<` and `>`) and
+# `ImplicitlyCopyable` or you won't be able to return
+def clamp[T: Comparable & ImplicitlyCopyable](val: T, lo: T, hi: T) -> T:
+    if val < lo:
+        return lo
+    if val > hi:
+        return hi
+    return val
+```
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>.
+
+## Markers
+
+> Three markers divide parameter and argument lists into zones that control how
+> callers pass values:
+
+| Marker | Arguments | Parameters |
+|--------|-----------|------------|
+| `//` | No | Infer-only |
+| `/` | Positional-only | Positional-only |
+| `*` | Keyword-only | Keyword-only |
+
+> Markers must appear in this order: `//`, then `/`, then `*`. Each can appear
+> once. `/` can't be first in the list, and `*` can't be last.
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>. The reference
+notes that Mojo markers follow Python's PEP 570 and PEP 3102.
+
+### Infer-only marker (`//`, parameters only)
+
+> `//` separates infer-only parameters from named parameters. The compiler
+> deduces infer-only parameters from call-site arguments:
+
+```mojo
+def inferred_type[T: Writable, //](value: T):
+    print(t"Value is {value}. Type is {reflect[T].name()}.")
+
+def main():
+    inferred_type(5)       # Value is 5. Type is SIMD[DType.int, 1].
+    inferred_type("Hello") # Value is Hello. Type is String.
+```
+
+> Infer-only parameters can't be specified positionally:
+
+```mojo
+# Error because 'inferred_type' got 1 positional parameter
+# but expected none.
+inferred_type[Int](5)
+```
+
+> Keyword syntax bypasses this restriction:
+
+```mojo
+inferred_type[T=Int](5) # OK: Value is 5. Type is Int.
+
+# Error because value passed to 'value' cannot be converted from
+# 'StringLiteral["Hello"]' to 'Int'
+inferred_type[T=Int]("Hello")
+```
+
+> Inference isn't limited to infer-only parameters. With enough context, the
+> compiler can infer named parameters too:
+
+```mojo
+def add[T: Intable](a: T, b: T) -> Int:
+    return Int(a) + Int(b)
+
+def main():
+    print(t"Sum is {add[Int](1, 2)}.")          # Explicit T
+    print(t"Sum is {add(1, 2)}.")               # Inferred T
+    print(t"Sum is {add[Float64](4.5, 1.2)}.")  # Explicit
+    print(t"Sum is {add(4.5, 1.2)}.")           # Inferred
+```
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>.
+
+### Positional-only marker (`/`)
+
+> Everything before `/` is positional-only. Callers must pass these values by
+> position, not by name:
+
+```mojo
+def div(a: Int, b: Int, /):
+    return a // b
+
+div(10, 3)       # OK
+div(a=10, b=3)   # Error
+```
+
+### Keyword-only marker (`*`)
+
+> Everything after `*` is keyword-only. Callers must pass values by name, whether
+> parameters or arguments:
+
+```mojo
+def configure(*, verbose: Bool, retries: Int):
+    # ...
+
+configure(verbose=True, retries=3)  # OK
+configure(True, 3)                  # Error
+```
+
+> A `*args` variadic argument has the same effect on arguments that follow it:
+
+```mojo
+def sum(*values: Int, name: String) -> Int:
+    print(name, end=": ")
+    var total = 0
+    for value in values:
+        total += value
+    return total
+
+def main():
+    print(sum(1, 2, 3, name="total"))  # total: 6
+    # print(sum(1, 2, 3, "subtotal"))
+        # Error because missing required keyword argument
+```
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>.
+
+## Default values
+
+> Arguments can have default values. Once a default appears, every following
+> positional argument must also have one:
+
+```mojo
+def connect(
+    host: String = "www.modular.com", port: Int = 80,
+):
+    print(t"Connecting to {host}:{port}")
+
+def main():
+    connect()             # Connecting to www.modular.com:80
+    connect(port=8080)    # Connecting to www.modular.com:8080
+```
+
+```mojo
+def my_function(x: Int, y: Int = 0, z: Int = 0) -> Int:
+    return x + y + z
+
+# Error because required positional argument follows optional
+# positional argument
+# def wrong(x: Int, y: Int = 0, z: Int):
+#     return x + y + z
+```
+
+> Keyword-only arguments are exempt from the ordering rule. They can mix required
+> and optional freely:
+
+```mojo
+def configure(*, retries: Int = 3, verbose: Bool):
+    pass
+```
+
+> Parameters also support defaults.
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>.
+
+| List | Default ordering rule |
+|------|-----------------------|
+| Positional arguments | After the first default, all following positional arguments need defaults |
+| Keyword-only arguments | Exempt; required and optional may mix |
+| Compile-time parameters | Defaults supported |
+
+## Function constraints (`where`)
+
+> A `where` clause constrains compile-time parameters. It appears at the end of
+> the declaration, after the return type (or after the argument list if there's
+> no return type):
+
+```mojo
+comptime LESS_THAN: Int32 = -1
+comptime EQUAL: Int32 = 0
+comptime GREATER_THAN: Int32 = 1
+
+def compare[T: AnyType](x: T, y: T) -> Int32 where conforms_to(T, Comparable):
+    if x < y:
+        return LESS_THAN
+    elif x > y:
+        return GREATER_THAN
+    else:
+        return EQUAL
+```
+
+> `where` clauses can express complex constraints, such as limiting SIMD vector
+> sizes to certain powers of 2:
+
+```mojo
+def process[
+    n: Int,
+](data: SIMD[DType.float32, n]) -> Float32 where (
+    n == 1 or n == 2 or n == 4 or n == 8 or n == 16 or n == 32
+):
+    var sum: Float32 = 0.0
+    for i in range(n):
+        sum += data[i]
+    return sum
+```
+
+> `where` clauses belong at the end of a declaration:
+
+```mojo
+# Correct: the `where` clause follows the signature.
+def correct[n: Int]() where n > 0:
+    pass
+```
+
+> A `where` clause inside a parameter list is invalid. Add it to the end of the
+> declaration:
+
+```mojo
+# Wrong: `where` is not allowed inside a parameter list.
+def wrong[n: Int where n > 0]():
+    pass
+```
+
+> A `where` clause in an argument list is invalid:
+
+```mojo
+# Wrong: `where` clauses can only be used with compile-time parameters.
+def wrong(x: Int where x > 0):
+    pass
+```
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>.
+
+## Argument conventions
+
+> An *argument convention* controls how an argument value passes to a function.
+> It appears before the argument name.
+
+| Convention | Meaning | Caller keeps ownership? | May have a default? |
+|------------|---------|-------------------------|---------------------|
+| (none) | Immutable reference (default) | Yes | Yes |
+| `imm` | Explicit immutable reference | Yes | Yes |
+| `mut` | Mutable reference | Yes (may be modified) | No |
+| `var` | Owned copy | No (unless copied) | Yes |
+| `out` | The return slot | — | No |
+| `deinit` | Destructive transfer / destroy | No | — |
+| `ref` | Reference with an explicit origin | Yes | — |
+
+Sources: <https://mojolang.org/docs/reference/function-declarations/> and
+<https://mojolang.org/docs/reference/keywords/>. These names are not reserved
+keywords; see [`keyword-conventions/`](../keyword-conventions/index.md).
+
+### The default convention
+
+> Without a convention, the argument is an immutable read-only reference. The
+> caller keeps ownership:
+
+```mojo
+def length[T: Copyable](s: List[T]) -> Int:
+    return len(s)
+```
+
+### `mut`
+
+> The caller's value is passed by mutable reference. Changes inside the function
+> are visible to the caller:
+
+```mojo
+def double_it(mut x: Int):
+    x *= 2
+```
+
+> `mut` arguments can't have default values:
+
+```mojo
+# Error because 'mut' arguments may not have defaults
+def wrong(mut x: Int = 0):
+    pass
+```
+
+### `var`
+
+> The function receives an owned copy. If the caller transfers ownership with
+> `^`, the original becomes inaccessible. Otherwise the value is copied and the
+> caller keeps access:
+
+```mojo
+def consume(var s: String):
+    s += "!"
+    print(s)
+
+def main():
+    var greeting = "Hello"
+    consume(greeting)   # Hello! (copied)
+    print(greeting)     # Hello
+
+    consume(greeting^)  # Hello! (moved)
+    # print(greeting)   # Error because uninitialized after move
+```
+
+### `out`
+
+> An `out` argument is the function's return slot. Only one `out` argument is
+> allowed. It replaces the `->` return type:
+
+```mojo
+def make_int(out result: Int):
+    result = 42
+
+def main():
+    var x = make_int()
+    print(x)  # 42
+```
+
+> A function can't use both `out` and `-> Type`:
+
+```mojo
+# Error because function cannot have both an 'out' argument
+#        and an explicit result type
+def wrong(out result: Int) -> Int:
+    result = 0
+```
+
+### `deinit`
+
+> The function takes ownership and destroys the value. Required for `self` in
+> `__deinit__` and the argument in move constructors:
+
+```mojo
+struct Resource:
+    var handle: Int
+
+    def __deinit__(deinit self):
+        _release(self.handle)
+```
+
+### `ref`
+
+> Passes a reference with an explicit *origin* specifier. The origin tracks where
+> the reference came from:
+
+```mojo
+def get_first[T: Copyable](ref data: List[T]) -> ref[data[0]] T:
+    return data[0]
+
+def main():
+    var data = ["one", "two", "three"]
+    ref first = get_first(data)  # mutable because `data` is mutable
+    print(first)  # one
+    first = "Первый"
+    print(data)  # ['Первый', 'two', 'three']
+```
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>.
+
+## Variadic arguments
+
+> Variadic arguments accept a varying number of values ("indefinite arity").
+> Functions like print use variadic arguments to accept any number of values.
+
+### Homogeneous variadics
+
+> `*` before the argument name accepts any number of positional arguments of the
+> same type (homogeneous arguments):
+
+```mojo
+def sum_all(*values: Int) -> Int:
+    var total = 0
+    for v in values:
+        total += v
+    return total
+```
+
+### Variadic packs
+
+> `*` before both the name and the type annotation creates a *variadic pack* that
+> accepts arguments of different types (heterogeneous arguments):
+
+```mojo
+def print_all[*Ts: Writable](*args: *Ts):
+    comptime for idx in range(args.__len__()):
+        print(args[idx], end=" ")
+    print()
+
+def main():
+    print_all("Hello", 42, 3.14)  # Hello 42 3.14
+```
+
+> **Why not `len(args)`?** `args` has a `VariadicPack` type, and
+> `VariadicPack.__len__` is a `@staticmethod`, so `args.__len__()` is the same as
+> `type_of(args).__len__()`. The compiler can evaluate it at compile time.
+> `len(args)` doesn't work because `args` is a dynamic value, so `len(args)` is a
+> dynamic expression. You can't use a dynamic value to drive a `comptime for`.
+
+### Variadic restrictions
+
+> A function can have at most one `*args`. Variadic arguments can't have default
+> values:
+
+```mojo
+# Error because variadic arguments may not have defaults
+def wrong(*args: Int = 0):
+    pass
+```
+
+> `out` arguments can't be variadic:
+
+```mojo
+def wrong(out *results: Int):
+    pass
+```
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>.
+
+## Function effects
+
+> Effects appear after the closing parenthesis and before `->`.
+
+| Effect | Form | Where it is valid |
+|--------|------|-------------------|
+| `raises` | `(args) raises -> T` | Declarations and function types |
+| `raises ErrorType` | `(args) raises E -> T` | Declarations and function types |
+| `thin` | `(args) thin -> T` | Function types only |
+| `abi("C")` | `(args) thin abi("C") -> T` | Function types (with `thin`) |
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>.
+
+### `raises` {#raises}
+
+> Declares that the function can raise an error. An optional error type can
+> follow `raises`:
+
+```mojo
+def parse(text: String) raises -> Int:
+    # ...
+
+def parse_strict(text: String) raises SomeError -> Int:
+    # ...
+```
+
+> A function can specify at most one error type after `raises`.
+
+### `thin` {#thin}
+
+> Used only in function types, `thin` indicates a function pointer type (not a
+> closure) and ensures the function value doesn't capture values from its
+> defining scope. Don't use `thin` in function declarations.
+
+```mojo
+def map[
+    T: Copyable, U: Copyable
+](f: def(T) thin -> U, input: List[T]) -> List[U]:  # Used as type
+    var result: List[U] = []
+    for item in input:
+        result.append(f(item))
+    return result^
+
+# `square` doesn't capture values. It can be passed to a thin type
+def square(x: Int) -> Int:
+    return x * x
+
+def main():
+    var nums: List[Int] = [1, 2, 3]
+    var squares = map(square, nums)
+    print(squares)  # Output: [1, 4, 9]
+```
+
+### `abi("C")` {#abi-c}
+
+> Declares that a function uses the C calling convention. Because C has no
+> closure mechanism, `abi("C")` always appears together with `thin` in function
+> types:
+
+```mojo
+# `add` is compiled with the C calling convention, so it can be called
+# from C or stored in a C-ABI function pointer.
+def add(a: Int32, b: Int32) abi("C") -> Int32:
+    return a + b
+
+def main():
+    var fp: def(Int32, Int32) thin abi("C") -> Int32 = add
+    print(fp(1, 2))  # 3
+```
+
+> Don't combine non-Mojo `abi()` effects with raising functions. Raising functions
+> change calling conventions in non-obvious ways.
+>
+> The Mojo compiler accepts `def (String) abi("Mojo") raises` and rejects
+> `def (String) abi("C") raises`. `abi("Mojo")` is already the default. You don't
+> need to specify it.
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>.
+
+## Return type
+
+> `->` introduces the return type. It appears after any effects:
+
+```mojo
+def square(x: Int) -> Int:
+    return x * x
+```
+
+> Without `->`, the function returns `None`.
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>. `out`
+declares the return value by name instead; see the `out` convention above and
+[`keyword-conventions/out`](../keyword-conventions/out.md).
+
+## Special methods
+
+> Certain method names have enforced signatures. The compiler checks argument
+> count, conventions, and return types.
+
+| Special method | Required signature | Constraints |
+|----------------|--------------------|-------------|
+| `__init__` | `def __init__(out self, ...)` | Must return `Self` with `out`; implicitly static |
+| Copy constructor | `def __init__(out self, *, copy: Self)` | Single keyword-only `copy`; default convention; cannot raise |
+| Move constructor | `def __init__(out self, *, deinit move: Self)` | Single keyword-only `move`; `deinit` convention; cannot raise |
+| `__deinit__` | `def __deinit__(deinit self)` | Cannot raise; not overloadable |
+
+### `__init__`
+
+> An initializer must have an `out self` result:
+
+```mojo
+struct Point:
+    var x: Int
+    var y: Int
+
+    def __init__(out self, x: Int, y: Int):
+        self.x = x
+        self.y = y
+```
+
+> Without `out self`, the compiler rejects the method:
+
+```mojo
+# Error because __init__ method must return Self type
+#        with 'out' argument
+def __init__(self):
+    pass
+```
+
+### Copy constructor
+
+> A copy constructor is an `__init__` with a single keyword-only argument named
+> `copy`:
+
+```mojo
+def __init__(out self, *, copy: Self):
+    self.x = copy.x
+    self.y = copy.y
+```
+
+> The `copy` argument must use the default convention of a readable immutable
+> reference. Copy constructors can't raise. Trivial types can't define a copy
+> constructor.
+
+### Move constructor
+
+> A move constructor is an `__init__` with a single keyword-only argument named
+> `move`:
+
+```mojo
+def __init__(out self, *, deinit move: Self):
+    self.x = move.x
+    self.y = move.y
+```
+
+> The `move` argument must use the `deinit` convention. Move constructors can't
+> raise.
+>
+> `RegisterPassable` types can't define a move constructor. They're always
+> movable by copying a register.
+
+### `__deinit__()`
+
+> The destructor takes `deinit self`:
+
+```mojo
+def __deinit__(deinit self):
+    _release(self.handle)
+```
+
+> Destructors can't raise. Trivial types can't define a destructor.
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>. The struct
+reference adds that `__deinit__` can't be overloaded, that implicitly deletable
+structs get a default one, and that explicit-destroy structs use a `deinit self`
+consuming method — see [Struct declarations](struct-declarations.md).
+
+## Nested functions
+
+> Functions can be defined inside other functions. Nested functions capture
+> values from the enclosing scope:
+
+```mojo
+def outer(x: Int) -> Int:
+    def inner() {imm} -> Int:  # Read-only references (`imm`) to outer scope
+        return x + 1
+    return inner()
+```
+
+> The compiler resolves nested function bodies immediately so captures bind
+> correctly.
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>. The capture
+list grammar is the subject of [Closure declarations](closure-declarations.md).
+
+## Static methods
+
+> `@staticmethod` makes a struct method callable without an instance. Static
+> methods don't take `self`:
+
+```mojo
+struct MathUtils:
+    comptime pi: Float64 = 3.141592653589793
+
+    @staticmethod
+    def square(x: Int) -> Int:
+        return x * x
+
+def main():
+    print(MathUtils.square(5))  # 25
+    print(MathUtils.pi)         # 3.141592653589793
+```
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>.
+
+## Function overloads {#function-overloads}
+
+> A *function overload* is one of two or more function declarations that share a
+> name but differ in their signature. The compiler picks one of them at each call
+> site. This is *static dispatch*: there's no runtime lookup. The choice is fixed
+> when the call is type-checked.
+>
+> An *overload set* is the collection of overloads the compiler considers at a
+> call site. It contains the declarations that share the same name in the same
+> scope.
+
+```mojo
+def add(x: Int, y: Int) -> Int:
+    return x + y
+
+def add(x: String, y: String) -> String:
+    return x + y
+```
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>. The guided
+tour of overloads is on [Overloads](../functions/overloads.md).
+
+### Where overload sets form
+
+| Scope | Overload set |
+|-------|--------------|
+| Module scope | Same-name declarations in one module |
+| Struct scope | Methods (including `@staticmethod`) per method name |
+| Trait scope | Required and provided methods per method name |
+
+> An overload set can't be extended across scopes. An import brings the name in as
+> a non-function reference: you can't add another overload to it from your own
+> module, and you can't redefine it. A local declaration that collides with an
+> import produces an error.
+>
+> To avoid the error, use an alias:
+
+```mojo
+from some_package import add as imported_add
+
+def add(x: Float64, y: Float64) -> Float64:
+    return x + y
+
+# `add` resolves to the local definition.
+# `imported_add` resolves to the imported one.
+```
+
+### What the compiler considers
+
+> Overload resolution looks at:
+>
+> - The number, position, and keyword of each argument.
+> - The type of each argument and each compile-time parameter.
+> - The argument conventions on each argument.
+> - Whether the candidate is an instance method or `@staticmethod`.
+> - Whether a constructor is `@implicit`.
+>
+> Overload resolution doesn't look at the return type or any other context
+> surrounding the call.
+
+### Resolution rules
+
+> The compiler discards every candidate whose signature can't be satisfied by the
+> call. It then compares the remaining candidates pairwise.
+>
+> It applies the following rules in order until one wins:
+>
+> 1. Pick the candidate that uses fewer implicit conversions between arguments and
+>    parameters. An empty match against an `*args` argument counts as an implicit
+>    conversion, so an exact match beats it.
+> 2. Pick the candidate that doesn't bind non-empty variadic arguments. A
+>    signature without `*args` beats one whose `*args` argument receives at least
+>    one value.
+> 3. Pick the candidate with fewer mismatched argument conventions.
+> 4. Pick the candidate with a shorter parameter list. A function with no
+>    compile-time parameters beats one that declares a parameter. The parameter
+>    list also counts implicit parameters synthesized from argument types (for
+>    example, the unbound parameters of a `SIMD[...]` argument become implicit
+>    parameters on the function).
+>
+> After fitness comparisons, the compiler applies two tiebreakers:
+>
+> 5. Pick the candidate that is an instance method over a `@staticmethod` with the
+>    same name.
+> 6. Pick the candidate that is a non-`@implicit` constructor over an `@implicit`
+>    one.
+>
+> If two candidates are equally good after these steps, the call is ambiguous.
+> The compiler rejects it.
+
+> Rule 4 means a concrete function wins over a parameterized one. `def foo(a:
+> Int)` beats `def foo[T: AnyType](a: T)` for a call with an `Int` argument, even
+> though both signatures match.
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>.
+
+### Overloading parameters
+
+```mojo
+def take_param[a: Int, b: Int]():
+    print("take_param[a: Int, b: Int]")
+
+def take_param[a: Int, b: String]():
+    print("take_param[a: Int, b: String]")
+
+def main():
+    take_param[1, 2]()       # take_param[a: Int, b: Int]
+    take_param[1, "hi"]()    # take_param[a: Int, b: String]
+```
+
+### Overloading the `self` convention
+
+> A method can be overloaded by its `self` convention. The default call site uses
+> an immutable reference for `self`, so `ref self` wins. To reach the `var self`
+> overload, the caller transfers with `^` at the call site:
+
+```mojo
+@fieldwise_init
+struct Counter(Copyable):
+    var n: Int
+
+    def which(ref self) -> Int:
+        return 1
+
+    # Constrain `var self` to types where `^` actually transfers.
+    # For `TrivialRegisterPassable` types, `^` is a no-op. This
+    # overload would otherwise be silently unreachable.
+    def which(var self) -> Int where not conforms_to(
+        Self, TrivialRegisterPassable
+    ):
+        return 2
+
+def main():
+    var c1 = Counter(0)
+    print(c1.which())     # 1: default call uses an immutable self reference
+    var c2 = Counter(0)
+    print((c2^).which())  # 2: caller transfers self
+```
+
+> **Sharp edge:** For `TrivialRegisterPassable` types, the transfer operator `^`
+> is a no-op. When using a trivial register type like `Int`, `Float64`, or
+> similar, `(c^).which()` becomes `c.which()`. The compiler will warn you but
+> won't reject your code.
+
+### Instance methods beat static methods
+
+> When both an instance method and a `@staticmethod` have the same name, a
+> method-call expression picks the instance method (rule 5):
+
+```mojo
+struct StaticOverload:
+    def __init__(out self):
+        pass
+
+    def foo(mut self):
+        print("instance method")
+
+    @staticmethod
+    def foo():
+        print("static method")
+
+def main():
+    var a = StaticOverload()
+    a.foo()  # instance method
+```
+
+> To call the static method explicitly, use the type name:
+
+```mojo
+StaticOverload.foo()  # static method
+```
+
+### Variadic candidates lose ties
+
+```mojo
+def take(x: Int):
+    print("take(x: Int)")
+
+def take(*xs: Int):
+    print("take(*xs: Int)")
+
+def main():
+    take(1)        # take(x: Int)
+    take(1, 2, 3)  # take(*xs: Int): the only match.
+```
+
+### Ambiguous calls
+
+```mojo
+struct MyString:
+    @implicit
+    def __init__(out self, s: String):
+        pass
+
+struct YourString:
+    @implicit
+    def __init__(out self, s: String):
+        pass
+
+def foo(name: MyString):
+    print("MyString")
+
+def foo(name: YourString):
+    print("YourString")
+
+def main():
+    # Error because the call is ambiguous: both overloads need exactly
+    # one implicit conversion from `String`
+    foo("Hello")
+```
+
+> Resolve ambiguity by casting at the call site:
+
+```mojo
+def main():
+    foo(MyString("Hello"))   # MyString
+    foo(YourString("Hello")) # YourString
+```
+
+Literals can trigger the same ambiguity. An `IntLiteral` converts to both `Int`
+and `Float64` at equal cost:
+
+```mojo
+def take_param[a: Int, b: Int]():
+    pass
+
+def take_param[a: Int, b: Float64]():
+    pass
+
+def main():
+    # Error because `IntLiteral` converts to both `Int` and `Float64`
+    # at equal cost; the compiler can't pick a winner
+    take_param[1, 2]()
+```
+
+### Return types don't disambiguate
+
+```mojo
+def parse(s: String) -> Int:
+    return 0
+
+# Error because `parse` cannot overload on return type only;
+# the differing return type doesn't form a new overload
+def parse(s: String) -> Float64:
+    return 0.0
+```
+
+### `raises` doesn't disambiguate
+
+> Two functions that differ only in whether they `raises` have the same signature
+> for overload-set purposes. The compiler rejects the second declaration:
+
+```mojo
+def maybe_raise(x: Int) -> Int:
+    return x
+
+# Error because `maybe_raise` already has this signature;
+# `raises` isn't part of the signature for overload purposes
+def maybe_raise(x: Int) raises -> Int:
+    raise Error("nope")
+```
+
+### Best practices
+
+> - Use overloads when each version implements the same operation on a different
+>   shape of input. Don't overload to mean different things under the same name.
+> - Don't rely on two `@implicit` constructors being reachable from the same
+>   source type. Cast at the call site or make one constructor non-`@implicit`.
+> - Prefer overloading on argument *type* over overloading on convention.
+>   Convention-based overloads work, but they're easy to misread.
+> - When an overload set should accept many types, write one parameterized
+>   function constrained with `where` instead of many near-duplicates. The
+>   compiler picks the concrete signature when both are present (rule 4).
+> - Don't define a function with the same name as one you imported. The compiler
+>   rejects it. Import under an alias when you need both names.
+
+Source: <https://mojolang.org/docs/reference/function-declarations/>.
+
+## Function declaration grammar (consolidated)
+
+```text
+func_decl       → "def" name ["[" parameter_list "]"]
+                  "(" [argument_list] ")" [markers_applied]
+                  [effects] ["->" type]
+                  ["where" constraint] ":" suite
+                | "def" name ["[" parameter_list "]"]
+                  "(" [argument_list] ")" [effects]
+                  ["{" capture_list "}"] ["->" type]
+                  ["where" constraint] ":" suite        # closure form
+
+name            → IDENT | "`" KEYWORD "`"
+parameter_list  → parameter ("," parameter)* [","]
+parameter       → NAME [":" type] ["=" expression]
+                | "*" NAME [":" type] ["=" expression]
+                | "*" NAME ":" "*" NAME                  # variadic pack
+                | "//" | "/"
+argument_list   → argument ("," argument)* [","]
+argument        → [convention] NAME [":" type] ["=" expression]
+                | "*" NAME [":" type]                    # homogeneous variadic
+                | "*" NAME ":" "*" NAME                  # variadic pack
+                | "/" | "*"
+convention      → "imm" | "mut" | "var" | "out" | "deinit" | "ref"
+effects         → "raises" [type] | "thin" | "abi" "(" string ")"
+```
+
+Sources: <https://mojolang.org/docs/reference/function-declarations/> and
+<https://mojolang.org/docs/reference/closure-declarations/>.
+
+## Pitfalls
+
+- **Writing `fn`.** In 1.0 the legacy `fn` keyword is an error; use `def`. Source:
+  <https://mojolang.org/releases/v1.0.0b2/>.
+- **Combining `out` with `->`.** A function with an `out` argument cannot also
+  declare a result type. Verified above.
+- **Giving `mut` a default.** `mut` arguments may not have defaults. Verified
+  above.
+- **Putting a required positional argument after an optional one.** That is an
+  error; keyword-only arguments are exempt. Verified above.
+- **Writing `len(args)` to drive a `comptime for`.** `args` is a
+  `VariadicPack`; use `args.__len__()`. Verified above.
+- **Giving a variadic a default, or making an `out` variadic.** Both are errors.
+  Verified above.
+- **Using `thin` or `abi("C")` in a declaration.** They are function-*type*
+  effects. Verified above.
+- **Combining `abi("C")` with `raises`.** The compiler rejects
+  `def (String) abi("C") raises`. Verified above.
+- **Overloading on return type or on `raises`.** Both are redefinition errors.
+  Verified above.
+- **Overloading on convention alone.** Rejected in 1.0. Source:
+  <https://mojolang.org/releases/v1.0.0/>.
+- **Defining a local function with an imported name.** The compiler rejects it;
+  import under an alias. Verified above.
+- **Assuming `^` transfers a trivial register type.** For a
+  `TrivialRegisterPassable` type it is a no-op, so a `var self` overload can be
+  unreachable without a `where` guard. Verified above.
+- **Writing a bare `**kwargs`.** A bare `**kwargs` is an error in 1.x; write
+  `var **kwargs`. Source: <https://mojolang.org/releases/v1.0.0/>.
+- **Naming a function after a reserved word.** `class`, `del`, `match`, `yield`
+  and friends error at the declaration; use a backtick-escaped identifier.
+  Source: <https://mojolang.org/releases/v1.0.0/>.
+
+## Sources
+
+- Mojo function declarations reference: <https://mojolang.org/docs/reference/function-declarations/>
+- Mojo closure declarations reference: <https://mojolang.org/docs/reference/closure-declarations/>
+- Mojo identifiers, keywords, and conventions reference: <https://mojolang.org/docs/reference/keywords/>
+- Functions (manual): <https://mojolang.org/docs/manual/functions/>
+- Mojo v1.0.0 release notes: <https://mojolang.org/releases/v1.0.0/>
+- Mojo v1.0.0b2 release notes: <https://mojolang.org/releases/v1.0.0b2/>

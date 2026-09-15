@@ -20,6 +20,7 @@ repository contains content only and runs nothing by itself.
 | Buch | Purpose |
 |---|---|
 | [`buch-authoring`](buch-authoring.buch/+index.md) | How to author a buch: structure, frontmatter, dynamic values, actions, distribution and good practices. |
+| [`mojov1`](mojov1.buch/+index.md) | Mojo 1.x: the current language, its keywords and conventions, types, memory, errors, interop, stdlib, tooling and the version change record. |
 
 Start with `buch-authoring` if you want to write your own buch.
 
@@ -30,6 +31,7 @@ buch lib add git github.com/LukasLow/buch-lib
 buch list
 buch read buch-authoring/structure
 buch read buch-authoring/dynamic-values
+buch read mojov1/keywords/def
 ```
 
 A git library is untrusted until you grant it. Key rendering and action
